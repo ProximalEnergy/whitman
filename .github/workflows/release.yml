@@ -82,12 +82,19 @@ jobs:
           }
 
       - name: Publish crate
-        if: steps.version.outputs.release_exists != 'true' && steps.version.outputs.crate_exists != 'true'
+        if: steps.version.outputs.release_exists != 'true'
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: |
           cargo publish --dry-run
-          cargo publish
+          set +e
+          publish_output="$(cargo publish 2>&1)"
+          publish_status="$?"
+          set -e
+          echo "$publish_output"
+          if [[ "$publish_status" -ne 0 ]] && ! grep -q "already exists" <<<"$publish_output"; then
+            exit "$publish_status"
+          fi
 
       - name: Tag source
         if: steps.version.outputs.release_exists != 'true'
