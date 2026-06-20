@@ -7,6 +7,7 @@ description = "Interactive profile picker for project AGENTS.md files"
 license = "Apache-2.0"
 repository = "https://github.com/ProximalEnergy/whitman"
 readme = "README.md"
+exclude = ["plan.md", "spec.md"]
 keywords = ["cli", "agents", "profile", "symlink"]
 categories = ["command-line-utilities", "development-tools"]
 

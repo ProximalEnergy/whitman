@@ -19,7 +19,6 @@ cargo install whitman
 From this repository:
 
 ```sh
-cd _cli-tools/whitman
 cargo install --path .
 ```
 
@@ -94,7 +93,6 @@ terminal.
 ## Development
 
 ```sh
-cd _cli-tools/whitman
 cargo fmt --check
 cargo clippy --all-targets --all-features -- -D warnings
 cargo test
@@ -107,7 +105,6 @@ CI runs format, clippy, and tests on Linux, macOS, and Windows.
 The crates.io package name is `whitman`. Before publishing:
 
 ```sh
-cd _cli-tools/whitman
 cargo package
 cargo publish
 ```
