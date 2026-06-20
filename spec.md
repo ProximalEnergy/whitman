@@ -11,26 +11,26 @@
 - Profiles are repository-local
 - Profile metadata inferred from files
 - Profile name inferred from `AGENTS.profile_name.md`
-- Profile description inferred from first line:
-  - plain text
-  - `<!-- whitman: description -->`
+- Profile description read from `.whitman/agents/descriptions.toml`
+- Profile description file entries are `profile_name = "description"`
 - Destination always `./AGENTS.md`
 - CLI displays profile list
-- If `.whitman/agents` has no profiles:
-  - prompt to create the first profile
-  - ask for profile name and description
-  - write `.whitman/agents/AGENTS.<name>.md`
-  - continue to profile selection
+- CLI supports creating a profile from the terminal UI with `+`
+- Create UI asks for profile name and description
+- Create UI writes `.whitman/agents/AGENTS.<name>.md`
+- Create UI writes description entry to `.whitman/agents/descriptions.toml`
+- Create UI selects the new profile
 - CLI supports search input
 - Search automatically filters available profiles
 - CLI supports keyboard navigation:
-  - `j` moves down
-  - `k` moves up
+  - Down arrow moves down
+  - Up arrow moves up
 - User confirms selected profile
 - CLI creates or updates symlink to chosen profile
 - CLI overwrites existing `AGENTS.md` with symlink
 - If existing `AGENTS.md` is not a whitman profile:
   - convert it into profile file `.whitman/agents/AGENTS.old.md`
+  - write description entry for `old` in `.whitman/agents/descriptions.toml`
   - then replace `AGENTS.md` with symlink
 - If existing profile would be overwritten:
   - confirm with user first

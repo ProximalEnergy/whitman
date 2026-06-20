@@ -5,7 +5,9 @@ use anyhow::Result;
 use tempfile::tempdir;
 use whitman::agents_file::{AGENTS_FILE_NAME, ApplyOutcome, apply_profile};
 use whitman::platform::windows_symlink_setup_instructions;
-use whitman::profile::{Profile, old_profile_path, parse_profile_file};
+use whitman::profile::{
+    Profile, descriptions_path, old_profile_path, parse_profile_file, write_profile_description,
+};
 
 #[cfg(unix)]
 use std::os::unix::fs as unix_fs;
@@ -118,9 +120,10 @@ fn converts_existing_agents_file_to_old_profile() -> Result<()> {
         }
     );
     let converted = fs::read_to_string(&expected_old_path)?;
+    assert_eq!(converted, "legacy agents");
     assert_eq!(
-        converted,
-        "<!-- whitman: Converted from AGENTS.md -->\nlegacy agents"
+        fs::read_to_string(descriptions_path(fixture.agents_dir.path()))?,
+        "old = \"Converted from AGENTS.md\"\nwork = \"Work\"\n"
     );
     let old_profile = parse_profile_file(&expected_old_path)?;
     assert_eq!(old_profile.name, "old");
@@ -137,6 +140,7 @@ fn confirms_before_overwriting_existing_old_profile() -> Result<()> {
     fs::write(&agents_path, "legacy agents")?;
     let old_path = old_profile_path(fixture.agents_dir.path());
     fs::write(&old_path, "previous old")?;
+    write_profile_description(fixture.agents_dir.path(), "old", "Previous old")?;
     let mut confirmer = |_message: &str| Ok(false);
 
     let error = apply_profile(
@@ -151,6 +155,10 @@ fn confirms_before_overwriting_existing_old_profile() -> Result<()> {
     assert!(error.contains("cancelled"));
     assert_eq!(fs::read_to_string(&agents_path)?, "legacy agents");
     assert_eq!(fs::read_to_string(&old_path)?, "previous old");
+    assert_eq!(
+        fs::read_to_string(descriptions_path(fixture.agents_dir.path()))?,
+        "old = \"Previous old\"\nwork = \"Work\"\n"
+    );
     Ok(())
 }
 
@@ -162,6 +170,7 @@ fn overwrites_existing_old_profile_after_confirmation() -> Result<()> {
     fs::write(&agents_path, "legacy agents")?;
     let old_path = old_profile_path(fixture.agents_dir.path());
     fs::write(&old_path, "previous old")?;
+    write_profile_description(fixture.agents_dir.path(), "old", "Previous old")?;
     let mut confirmer = |_message: &str| Ok(true);
 
     if apply_or_skip_symlink_permission(
@@ -175,9 +184,10 @@ fn overwrites_existing_old_profile_after_confirmation() -> Result<()> {
         return Ok(());
     }
 
+    assert_eq!(fs::read_to_string(&old_path)?, "legacy agents");
     assert_eq!(
-        fs::read_to_string(&old_path)?,
-        "<!-- whitman: Converted from AGENTS.md -->\nlegacy agents"
+        fs::read_to_string(descriptions_path(fixture.agents_dir.path()))?,
+        "old = \"Converted from AGENTS.md\"\nwork = \"Work\"\n"
     );
     assert_symlink_target(&agents_path, &profile.path)?;
     Ok(())
@@ -208,7 +218,8 @@ impl Fixture {
 
     fn write_profile(&self, name: &str, description: &str) -> Result<Profile> {
         let path = self.agents_dir.path().join(format!("AGENTS.{name}.md"));
-        fs::write(&path, format!("{description}\nprofile body\n"))?;
+        fs::write(&path, "profile body\n")?;
+        write_profile_description(self.agents_dir.path(), name, description)?;
         Ok(Profile {
             name: name.to_string(),
             description: description.to_string(),

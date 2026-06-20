@@ -4,10 +4,13 @@ use std::path::{Component, Path, PathBuf};
 use anyhow::{Context, Result, anyhow, bail};
 
 use crate::platform::create_file_symlink;
-use crate::profile::{Profile, old_profile_path};
+use crate::profile::{
+    Profile, old_profile_path, profile_description_exists, remove_profile_description,
+    write_profile_description,
+};
 
 pub const AGENTS_FILE_NAME: &str = "AGENTS.md";
-const OLD_PROFILE_HEADER: &[u8] = b"<!-- whitman: Converted from AGENTS.md -->\n";
+const OLD_PROFILE_DESCRIPTION: &str = "Converted from AGENTS.md";
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum ApplyOutcome {
@@ -63,7 +66,8 @@ pub fn apply_profile(
     }
 
     let old_path = old_profile_path(agents_dir);
-    if old_path.exists() || is_symlink(&old_path)? {
+    if old_path.exists() || is_symlink(&old_path)? || profile_description_exists(agents_dir, "old")?
+    {
         let confirmed = confirmer.confirm(&format!(
             "{} already exists. Overwrite it with the current AGENTS.md?",
             old_path.display()
@@ -72,9 +76,10 @@ pub fn apply_profile(
             bail!("cancelled before overwriting {}", old_path.display());
         }
         remove_existing_profile(&old_path)?;
+        remove_profile_description(agents_dir, "old")?;
     }
 
-    convert_agents_file_to_old_profile(&agents_path, &old_path)?;
+    convert_agents_file_to_old_profile(&agents_path, &old_path, agents_dir)?;
     fs::remove_file(&agents_path)
         .with_context(|| format!("failed to remove {}", agents_path.display()))?;
     create_file_symlink(&profile.path, &agents_path)?;
@@ -84,15 +89,17 @@ pub fn apply_profile(
     })
 }
 
-fn convert_agents_file_to_old_profile(agents_path: &Path, old_path: &Path) -> Result<()> {
+fn convert_agents_file_to_old_profile(
+    agents_path: &Path,
+    old_path: &Path,
+    agents_dir: &Path,
+) -> Result<()> {
     let existing = fs::read(agents_path)
         .with_context(|| format!("failed to read {}", agents_path.display()))?;
-    let mut converted = Vec::with_capacity(OLD_PROFILE_HEADER.len() + existing.len());
-    converted.extend_from_slice(OLD_PROFILE_HEADER);
-    converted.extend_from_slice(&existing);
 
-    fs::write(old_path, converted)
-        .with_context(|| format!("failed to write converted profile {}", old_path.display()))
+    fs::write(old_path, existing)
+        .with_context(|| format!("failed to write converted profile {}", old_path.display()))?;
+    write_profile_description(agents_dir, "old", OLD_PROFILE_DESCRIPTION)
 }
 
 pub fn ensure_whitman_symlink(agents_path: &Path, agents_dir: &Path) -> Result<()> {
@@ -114,8 +121,13 @@ pub fn ensure_whitman_symlink(agents_path: &Path, agents_dir: &Path) -> Result<(
 }
 
 fn remove_existing_profile(path: &Path) -> Result<()> {
-    let metadata = fs::symlink_metadata(path)
-        .with_context(|| format!("failed to inspect {}", path.display()))?;
+    let metadata = match fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => {
+            return Err(error).with_context(|| format!("failed to inspect {}", path.display()));
+        }
+    };
     if metadata.is_file() || metadata.file_type().is_symlink() {
         fs::remove_file(path).with_context(|| format!("failed to remove {}", path.display()))?;
         return Ok(());

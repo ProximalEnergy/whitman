@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -7,8 +8,7 @@ pub const MAX_NAME_LEN_EXCLUSIVE: usize = 15;
 pub const MAX_DESCRIPTION_LEN_EXCLUSIVE: usize = 100;
 const PROFILE_PREFIX: &str = "AGENTS.";
 const PROFILE_SUFFIX: &str = ".md";
-const DESCRIPTION_PREFIX: &str = "<!-- whitman:";
-const DESCRIPTION_SUFFIX: &str = "-->";
+pub const DESCRIPTIONS_FILE_NAME: &str = "descriptions.toml";
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct Profile {
@@ -47,7 +47,7 @@ pub fn list_profiles(agents_dir: &Path) -> Result<Vec<Profile>> {
 
 pub fn create_profile_file(agents_dir: &Path, name: &str, description: &str) -> Result<Profile> {
     validate_profile_name(name)?;
-    validate_plain_description(description)?;
+    validate_profile_description(description)?;
 
     fs::create_dir_all(agents_dir)
         .with_context(|| format!("failed to create {}", agents_dir.display()))?;
@@ -56,8 +56,15 @@ pub fn create_profile_file(agents_dir: &Path, name: &str, description: &str) -> 
         bail!("profile already exists: {}", path.display());
     }
 
-    fs::write(&path, format!("{description}\n\n# Instructions\n"))
+    let mut descriptions = read_profile_descriptions(agents_dir)?;
+    if descriptions.contains_key(name) {
+        bail!("profile description already exists for {name}");
+    }
+
+    fs::write(&path, "# Instructions\n")
         .with_context(|| format!("failed to write {}", path.display()))?;
+    descriptions.insert(name.to_string(), parse_description(description)?);
+    write_profile_descriptions(agents_dir, &descriptions)?;
     parse_profile_file(&path)
 }
 
@@ -66,14 +73,23 @@ pub fn parse_profile_file(path: &Path) -> Result<Profile> {
     validate_profile_name(&name)
         .with_context(|| format!("invalid profile file {}", path.display()))?;
 
-    let contents =
-        fs::read_to_string(path).with_context(|| format!("failed to read {}", path.display()))?;
-    let first_line = contents
-        .lines()
-        .next()
-        .ok_or_else(|| anyhow!("profile {} is empty", path.display()))?;
-    let description = validate_profile_description(first_line)
-        .with_context(|| format!("invalid profile description in {}", path.display()))?;
+    let agents_dir = path
+        .parent()
+        .ok_or_else(|| anyhow!("profile path has no parent directory: {}", path.display()))?;
+    let descriptions = read_profile_descriptions(agents_dir)?;
+    let description = descriptions.get(&name).cloned().ok_or_else(|| {
+        anyhow!(
+            "missing profile description for '{}' in {}",
+            name,
+            descriptions_path(agents_dir).display()
+        )
+    })?;
+    let description = parse_description(&description).with_context(|| {
+        format!(
+            "invalid profile description in {}",
+            descriptions_path(agents_dir).display()
+        )
+    })?;
 
     Ok(Profile {
         name,
@@ -110,6 +126,40 @@ pub fn old_profile_path(agents_dir: &Path) -> PathBuf {
     agents_dir.join("AGENTS.old.md")
 }
 
+pub fn descriptions_path(agents_dir: &Path) -> PathBuf {
+    agents_dir.join(DESCRIPTIONS_FILE_NAME)
+}
+
+pub fn read_profile_descriptions(agents_dir: &Path) -> Result<BTreeMap<String, String>> {
+    let path = descriptions_path(agents_dir);
+    if !path.exists() {
+        return Ok(BTreeMap::new());
+    }
+
+    let contents =
+        fs::read_to_string(&path).with_context(|| format!("failed to read {}", path.display()))?;
+    parse_descriptions_file(&contents).with_context(|| format!("invalid {}", path.display()))
+}
+
+pub fn write_profile_description(agents_dir: &Path, name: &str, description: &str) -> Result<()> {
+    validate_profile_name(name)?;
+    let mut descriptions = read_profile_descriptions(agents_dir)?;
+    descriptions.insert(name.to_string(), parse_description(description)?);
+    write_profile_descriptions(agents_dir, &descriptions)
+}
+
+pub fn remove_profile_description(agents_dir: &Path, name: &str) -> Result<()> {
+    validate_profile_name(name)?;
+    let mut descriptions = read_profile_descriptions(agents_dir)?;
+    descriptions.remove(name);
+    write_profile_descriptions(agents_dir, &descriptions)
+}
+
+pub fn profile_description_exists(agents_dir: &Path, name: &str) -> Result<bool> {
+    validate_profile_name(name)?;
+    Ok(read_profile_descriptions(agents_dir)?.contains_key(name))
+}
+
 pub fn validate_profile_name(name: &str) -> Result<()> {
     if name.is_empty() {
         bail!("profile name cannot be empty");
@@ -129,16 +179,13 @@ pub fn validate_profile_name(name: &str) -> Result<()> {
     Ok(())
 }
 
-pub fn parse_description(line: &str) -> Result<String> {
-    let trimmed = line.trim();
-    if !trimmed.starts_with(DESCRIPTION_PREFIX) || !trimmed.ends_with(DESCRIPTION_SUFFIX) {
-        bail!("first line must be formatted as <!-- whitman: description -->");
-    }
-
-    let description =
-        trimmed[DESCRIPTION_PREFIX.len()..trimmed.len() - DESCRIPTION_SUFFIX.len()].trim();
+pub fn parse_description(contents: &str) -> Result<String> {
+    let description = contents.trim();
     if description.is_empty() {
         bail!("description cannot be empty");
+    }
+    if description.lines().count() > 1 {
+        bail!("description must be a single line");
     }
     if description.chars().count() >= MAX_DESCRIPTION_LEN_EXCLUSIVE {
         bail!(
@@ -151,26 +198,93 @@ pub fn parse_description(line: &str) -> Result<String> {
 }
 
 pub fn validate_profile_description(line: &str) -> Result<String> {
-    if line.trim().starts_with(DESCRIPTION_PREFIX) {
-        return parse_description(line);
-    }
-
-    validate_plain_description(line)
+    parse_description(line)
 }
 
-fn validate_plain_description(line: &str) -> Result<String> {
-    let description = line.trim();
-    if description.is_empty() {
-        bail!("description cannot be empty");
+fn write_profile_descriptions(
+    agents_dir: &Path,
+    descriptions: &BTreeMap<String, String>,
+) -> Result<()> {
+    fs::create_dir_all(agents_dir)
+        .with_context(|| format!("failed to create {}", agents_dir.display()))?;
+    let path = descriptions_path(agents_dir);
+    let mut contents = String::new();
+    for (name, description) in descriptions {
+        validate_profile_name(name)?;
+        let description = parse_description(description)?;
+        contents.push_str(name);
+        contents.push_str(" = \"");
+        contents.push_str(&escape_description(&description));
+        contents.push_str("\"\n");
     }
-    if description.chars().count() >= MAX_DESCRIPTION_LEN_EXCLUSIVE {
-        bail!(
-            "description must be under {} characters",
-            MAX_DESCRIPTION_LEN_EXCLUSIVE
-        );
+    fs::write(&path, contents).with_context(|| format!("failed to write {}", path.display()))
+}
+
+fn parse_descriptions_file(contents: &str) -> Result<BTreeMap<String, String>> {
+    let mut descriptions = BTreeMap::new();
+    for (index, raw_line) in contents.lines().enumerate() {
+        let line = raw_line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+
+        let (name, value) = line.split_once('=').ok_or_else(|| {
+            anyhow!(
+                "line {} must be formatted as name = \"description\"",
+                index + 1
+            )
+        })?;
+        let name = name.trim();
+        validate_profile_name(name)
+            .with_context(|| format!("invalid profile name on line {}", index + 1))?;
+        let description = parse_quoted_description(value.trim())
+            .with_context(|| format!("invalid description on line {}", index + 1))?;
+        if descriptions
+            .insert(name.to_string(), parse_description(&description)?)
+            .is_some()
+        {
+            bail!("duplicate profile description for {name}");
+        }
     }
 
-    Ok(description.to_string())
+    Ok(descriptions)
+}
+
+fn parse_quoted_description(value: &str) -> Result<String> {
+    if !value.starts_with('"') || !value.ends_with('"') || value.len() < 2 {
+        bail!("description must be a quoted string");
+    }
+
+    let inner = &value[1..value.len() - 1];
+    let mut parsed = String::new();
+    let mut escaped = false;
+    for character in inner.chars() {
+        if escaped {
+            match character {
+                '"' => parsed.push('"'),
+                '\\' => parsed.push('\\'),
+                'n' => parsed.push('\n'),
+                'r' => parsed.push('\r'),
+                't' => parsed.push('\t'),
+                other => bail!("unsupported escape sequence \\{other}"),
+            }
+            escaped = false;
+        } else if character == '\\' {
+            escaped = true;
+        } else {
+            parsed.push(character);
+        }
+    }
+
+    if escaped {
+        bail!("description cannot end with an unfinished escape");
+    }
+
+    Ok(parsed)
+}
+
+fn escape_description(description: &str) -> String {
+    description.replace('\\', "\\\\").replace('"', "\\\"")
 }
 
 pub fn filter_profiles<'a>(profiles: &'a [Profile], query: &str) -> Vec<&'a Profile> {

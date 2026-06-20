@@ -60,7 +60,7 @@ show setup instructions, no copy fallback.
 
 ## Task 8: Terminal UI
 ### Status: Done
-Build ratatui/crossterm profile picker: list, search filter, `j`/`k`
+Build ratatui/crossterm profile picker: list, search filter, arrow-key
 navigation, confirmation screen.
 
 **File touched:**
@@ -121,7 +121,7 @@ requires explicit confirmation.
 - `cargo fmt --check`
 - `cargo clippy --all-targets --all-features -- -D warnings`
 - `cargo test --all-targets --all-features`
-- PTY CLI smoke tests for default selection, search filtering, `j` navigation,
+- PTY CLI smoke tests for default selection, search filtering, arrow navigation,
   and conversion of an existing `AGENTS.md` to a valid `agents.old.md` profile
   with preserved original content
 - `cargo package --allow-dirty`
