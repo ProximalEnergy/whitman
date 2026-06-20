@@ -10,7 +10,7 @@ fn help_documents_interactive_profile_picker() {
         .assert()
         .success()
         .stdout(predicate::str::contains(
-            "Choose a global profile and link it to ./AGENTS.md",
+            "Choose a repository profile and link it to ./AGENTS.md",
         ));
 }
 

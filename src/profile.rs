@@ -2,11 +2,10 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow, bail};
-use directories::UserDirs;
 
 pub const MAX_NAME_LEN_EXCLUSIVE: usize = 15;
 pub const MAX_DESCRIPTION_LEN_EXCLUSIVE: usize = 100;
-const PROFILE_PREFIX: &str = "agents.";
+const PROFILE_PREFIX: &str = "AGENTS.";
 const PROFILE_SUFFIX: &str = ".md";
 const DESCRIPTION_PREFIX: &str = "<!-- whitman:";
 const DESCRIPTION_SUFFIX: &str = "-->";
@@ -18,23 +17,21 @@ pub struct Profile {
     pub path: PathBuf,
 }
 
-pub fn default_profiles_dir() -> Result<PathBuf> {
-    let home = UserDirs::new()
-        .ok_or_else(|| anyhow!("could not determine the user's home directory"))?
-        .home_dir()
-        .to_path_buf();
-
-    Ok(home.join(".whitman").join("profiles"))
+pub fn repository_agents_dir(work_dir: &Path) -> PathBuf {
+    whitman_root(work_dir)
+        .unwrap_or_else(|| work_dir.to_path_buf())
+        .join(".whitman")
+        .join("agents")
 }
 
-pub fn list_profiles(profiles_dir: &Path) -> Result<Vec<Profile>> {
-    if !profiles_dir.exists() {
+pub fn list_profiles(agents_dir: &Path) -> Result<Vec<Profile>> {
+    if !agents_dir.exists() {
         return Ok(Vec::new());
     }
 
     let mut profiles = Vec::new();
-    for entry in fs::read_dir(profiles_dir)
-        .with_context(|| format!("failed to read {}", profiles_dir.display()))?
+    for entry in fs::read_dir(agents_dir)
+        .with_context(|| format!("failed to read {}", agents_dir.display()))?
     {
         let entry = entry?;
         let path = entry.path();
@@ -48,6 +45,22 @@ pub fn list_profiles(profiles_dir: &Path) -> Result<Vec<Profile>> {
     Ok(profiles)
 }
 
+pub fn create_profile_file(agents_dir: &Path, name: &str, description: &str) -> Result<Profile> {
+    validate_profile_name(name)?;
+    validate_plain_description(description)?;
+
+    fs::create_dir_all(agents_dir)
+        .with_context(|| format!("failed to create {}", agents_dir.display()))?;
+    let path = agents_dir.join(profile_file_name(name)?);
+    if path.exists() {
+        bail!("profile already exists: {}", path.display());
+    }
+
+    fs::write(&path, format!("{description}\n\n# Instructions\n"))
+        .with_context(|| format!("failed to write {}", path.display()))?;
+    parse_profile_file(&path)
+}
+
 pub fn parse_profile_file(path: &Path) -> Result<Profile> {
     let name = profile_name_from_path(path)?;
     validate_profile_name(&name)
@@ -59,7 +72,7 @@ pub fn parse_profile_file(path: &Path) -> Result<Profile> {
         .lines()
         .next()
         .ok_or_else(|| anyhow!("profile {} is empty", path.display()))?;
-    let description = parse_description(first_line)
+    let description = validate_profile_description(first_line)
         .with_context(|| format!("invalid profile description in {}", path.display()))?;
 
     Ok(Profile {
@@ -81,7 +94,7 @@ pub fn profile_name_from_path(path: &Path) -> Result<String> {
         })?;
 
     if !file_name.starts_with(PROFILE_PREFIX) || !file_name.ends_with(PROFILE_SUFFIX) {
-        bail!("profile file name must match agents.<name>.md: {file_name}");
+        bail!("profile file name must match AGENTS.<name>.md: {file_name}");
     }
 
     let name = &file_name[PROFILE_PREFIX.len()..file_name.len() - PROFILE_SUFFIX.len()];
@@ -93,8 +106,8 @@ pub fn profile_file_name(name: &str) -> Result<String> {
     Ok(format!("{PROFILE_PREFIX}{name}{PROFILE_SUFFIX}"))
 }
 
-pub fn old_profile_path(profiles_dir: &Path) -> PathBuf {
-    profiles_dir.join("agents.old.md")
+pub fn old_profile_path(agents_dir: &Path) -> PathBuf {
+    agents_dir.join("AGENTS.old.md")
 }
 
 pub fn validate_profile_name(name: &str) -> Result<()> {
@@ -137,6 +150,29 @@ pub fn parse_description(line: &str) -> Result<String> {
     Ok(description.to_string())
 }
 
+pub fn validate_profile_description(line: &str) -> Result<String> {
+    if line.trim().starts_with(DESCRIPTION_PREFIX) {
+        return parse_description(line);
+    }
+
+    validate_plain_description(line)
+}
+
+fn validate_plain_description(line: &str) -> Result<String> {
+    let description = line.trim();
+    if description.is_empty() {
+        bail!("description cannot be empty");
+    }
+    if description.chars().count() >= MAX_DESCRIPTION_LEN_EXCLUSIVE {
+        bail!(
+            "description must be under {} characters",
+            MAX_DESCRIPTION_LEN_EXCLUSIVE
+        );
+    }
+
+    Ok(description.to_string())
+}
+
 pub fn filter_profiles<'a>(profiles: &'a [Profile], query: &str) -> Vec<&'a Profile> {
     let query = query.trim().to_lowercase();
     if query.is_empty() {
@@ -158,4 +194,12 @@ fn is_profile_file_name(path: &Path) -> bool {
         .is_some_and(|file_name| {
             file_name.starts_with(PROFILE_PREFIX) && file_name.ends_with(PROFILE_SUFFIX)
         })
+}
+
+fn whitman_root(work_dir: &Path) -> Option<PathBuf> {
+    work_dir
+        .ancestors()
+        .find(|path| path.join(".whitman").exists())
+        .or_else(|| work_dir.ancestors().find(|path| path.join(".git").exists()))
+        .map(Path::to_path_buf)
 }

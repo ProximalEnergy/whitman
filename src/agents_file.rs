@@ -31,12 +31,12 @@ where
 
 pub fn apply_profile(
     work_dir: &Path,
-    profiles_dir: &Path,
+    agents_dir: &Path,
     profile: &Profile,
     confirmer: &mut impl Confirm,
 ) -> Result<ApplyOutcome> {
-    fs::create_dir_all(profiles_dir)
-        .with_context(|| format!("failed to create {}", profiles_dir.display()))?;
+    fs::create_dir_all(agents_dir)
+        .with_context(|| format!("failed to create {}", agents_dir.display()))?;
 
     let agents_path = work_dir.join(AGENTS_FILE_NAME);
     if !agents_path.exists() && !is_symlink(&agents_path)? {
@@ -48,7 +48,7 @@ pub fn apply_profile(
         .with_context(|| format!("failed to inspect {}", agents_path.display()))?;
 
     if metadata.file_type().is_symlink() {
-        ensure_whitman_symlink(&agents_path, profiles_dir)?;
+        ensure_whitman_symlink(&agents_path, agents_dir)?;
         fs::remove_file(&agents_path)
             .with_context(|| format!("failed to remove {}", agents_path.display()))?;
         create_file_symlink(&profile.path, &agents_path)?;
@@ -62,7 +62,7 @@ pub fn apply_profile(
         );
     }
 
-    let old_path = old_profile_path(profiles_dir);
+    let old_path = old_profile_path(agents_dir);
     if old_path.exists() || is_symlink(&old_path)? {
         let confirmed = confirmer.confirm(&format!(
             "{} already exists. Overwrite it with the current AGENTS.md?",
@@ -95,18 +95,18 @@ fn convert_agents_file_to_old_profile(agents_path: &Path, old_path: &Path) -> Re
         .with_context(|| format!("failed to write converted profile {}", old_path.display()))
 }
 
-pub fn ensure_whitman_symlink(agents_path: &Path, profiles_dir: &Path) -> Result<()> {
+pub fn ensure_whitman_symlink(agents_path: &Path, agents_dir: &Path) -> Result<()> {
     let target = fs::read_link(agents_path)
         .with_context(|| format!("failed to read symlink {}", agents_path.display()))?;
     let resolved_target = resolve_link_target(agents_path, &target)?;
-    let profiles_dir = normalize_absolute(profiles_dir)?;
+    let agents_dir = normalize_absolute(agents_dir)?;
 
-    if !resolved_target.starts_with(&profiles_dir) {
+    if !resolved_target.starts_with(&agents_dir) {
         bail!(
             "{} is a symlink to {}, which is outside {}; refusing to overwrite it",
             agents_path.display(),
             resolved_target.display(),
-            profiles_dir.display()
+            agents_dir.display()
         );
     }
 

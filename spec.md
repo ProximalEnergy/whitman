@@ -6,16 +6,21 @@
 - Each profile has:
   - name under 15 characters
   - description under 100 characters
-  - associated `agents.profile_name.md` file
-- Profile location: `~/.whitman/profiles`
-- Windows profile location: `%USERPROFILE%\.whitman\profiles`
-- Profiles are global
+  - associated `AGENTS.profile_name.md` file
+- Profile location: `.whitman/agents` where Whitman is initialized
+- Profiles are repository-local
 - Profile metadata inferred from files
-- Profile name inferred from `agents.profile_name.md`
+- Profile name inferred from `AGENTS.profile_name.md`
 - Profile description inferred from first line:
+  - plain text
   - `<!-- whitman: description -->`
 - Destination always `./AGENTS.md`
 - CLI displays profile list
+- If `.whitman/agents` has no profiles:
+  - prompt to create the first profile
+  - ask for profile name and description
+  - write `.whitman/agents/AGENTS.<name>.md`
+  - continue to profile selection
 - CLI supports search input
 - Search automatically filters available profiles
 - CLI supports keyboard navigation:
@@ -25,11 +30,11 @@
 - CLI creates or updates symlink to chosen profile
 - CLI overwrites existing `AGENTS.md` with symlink
 - If existing `AGENTS.md` is not a whitman profile:
-  - convert it into profile file `agents.old.md`
+  - convert it into profile file `.whitman/agents/AGENTS.old.md`
   - then replace `AGENTS.md` with symlink
 - If existing profile would be overwritten:
   - confirm with user first
-- Existing symlink outside `~/.whitman/profiles`:
+- Existing symlink outside `.whitman/agents`:
   - refuse
   - show error
   - no overwrite
@@ -61,7 +66,6 @@
   - `crossterm` for terminal events/backend
   - `clap` for CLI args
   - `anyhow` or `thiserror` for errors
-  - `dirs` or `directories` for config paths
 - Existing libraries:
   - Rust standard library filesystem APIs for symlink operations
 
