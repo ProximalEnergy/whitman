@@ -1,0 +1,27 @@
+[package]
+name = "whitman"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.96"
+description = "Interactive profile picker for project AGENTS.md files"
+license = "Apache-2.0"
+repository = "https://github.com/ProximalEnergy/whitman"
+readme = "README.md"
+keywords = ["cli", "agents", "profile", "symlink"]
+categories = ["command-line-utilities", "development-tools"]
+
+[[bin]]
+name = "whitman"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1.0"
+clap = { version = "4.5", features = ["derive"] }
+crossterm = "0.29"
+directories = "6.0"
+ratatui = "0.29"
+
+[dev-dependencies]
+assert_cmd = "2.0"
+predicates = "3.1"
+tempfile = "3.20"
