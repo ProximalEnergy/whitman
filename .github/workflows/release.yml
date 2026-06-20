@@ -1,0 +1,173 @@
+name: Release
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+env:
+  HOMEBREW_TAP_REPO: ProximalEnergy/homebrew-tap
+  MISE_UPSTREAM_REPO: jdx/mise
+
+jobs:
+  release:
+    name: Publish release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Rust
+        run: rustup toolchain install 1.96.0 --component rustfmt --component clippy
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: . -> target
+
+      - name: Resolve version
+        id: version
+        run: |
+          version="$(_scripts/cargo_version.sh)"
+          tag="v${version}"
+          echo "version=${version}" >>"$GITHUB_OUTPUT"
+          echo "tag=${tag}" >>"$GITHUB_OUTPUT"
+          if git ls-remote --exit-code --tags origin "refs/tags/${tag}" >/dev/null 2>&1; then
+            echo "release_exists=true" >>"$GITHUB_OUTPUT"
+          else
+            echo "release_exists=false" >>"$GITHUB_OUTPUT"
+          fi
+          crate_status="$(curl -sS -o /dev/null -w "%{http_code}" "https://crates.io/api/v1/crates/whitman/${version}")"
+          if [[ "$crate_status" == "200" ]]; then
+            echo "crate_exists=true" >>"$GITHUB_OUTPUT"
+          else
+            echo "crate_exists=false" >>"$GITHUB_OUTPUT"
+          fi
+
+      - name: Skip existing release
+        if: steps.version.outputs.release_exists == 'true'
+        run: echo "${{ steps.version.outputs.tag }} already exists; nothing to publish."
+
+      - name: Check
+        if: steps.version.outputs.release_exists != 'true'
+        run: |
+          cargo fmt --check
+          cargo clippy --all-targets --all-features -- -D warnings
+          cargo test --all-targets --all-features
+
+      - name: Validate secrets
+        if: steps.version.outputs.release_exists != 'true'
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+          RELEASE_GITHUB_TOKEN: ${{ secrets.RELEASE_GITHUB_TOKEN }}
+        run: |
+          test -n "$CARGO_REGISTRY_TOKEN" || {
+            echo "CARGO_REGISTRY_TOKEN is required" >&2
+            exit 1
+          }
+          test -n "$RELEASE_GITHUB_TOKEN" || {
+            echo "RELEASE_GITHUB_TOKEN is required for Homebrew tap and mise PR writes" >&2
+            exit 1
+          }
+
+      - name: Publish crate
+        if: steps.version.outputs.release_exists != 'true' && steps.version.outputs.crate_exists != 'true'
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: |
+          cargo publish --dry-run
+          cargo publish
+
+      - name: Tag source
+        if: steps.version.outputs.release_exists != 'true'
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$TAG" -m "Release $TAG"
+          git push origin "$TAG"
+
+      - name: Create GitHub release
+        if: steps.version.outputs.release_exists != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          gh release create "$TAG" \
+            --title "$TAG" \
+            --notes "Published whitman $TAG to crates.io, Homebrew, and mise metadata."
+
+      - name: Update Homebrew tap
+        if: steps.version.outputs.release_exists != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_GITHUB_TOKEN }}
+          VERSION: ${{ steps.version.outputs.version }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          work="$(mktemp -d)"
+          git clone "https://x-access-token:${GH_TOKEN}@github.com/${HOMEBREW_TAP_REPO}.git" "$work/homebrew-tap"
+          git -C "$work/homebrew-tap" checkout -B main
+          git -C "$work/homebrew-tap" config user.name "github-actions[bot]"
+          git -C "$work/homebrew-tap" config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          tarball_url="https://github.com/${GITHUB_REPOSITORY}/archive/refs/tags/${TAG}.tar.gz"
+          sha256="$(curl -fsSL "$tarball_url" | sha256sum | awk '{print $1}')"
+          _scripts/write_homebrew_formula.sh "$VERSION" "$sha256" "$work/homebrew-tap/Formula/whitman.rb"
+
+          git -C "$work/homebrew-tap" add Formula/whitman.rb
+          if ! git -C "$work/homebrew-tap" diff --cached --quiet; then
+            git -C "$work/homebrew-tap" commit -m "whitman ${VERSION}"
+            git -C "$work/homebrew-tap" push origin main
+          fi
+
+      - name: Open mise registry PR
+        if: steps.version.outputs.release_exists != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_GITHUB_TOKEN }}
+        run: |
+          owner="$(gh api user --jq .login)"
+          branch="add-whitman-registry"
+          work="$(mktemp -d)"
+
+          gh repo fork "$MISE_UPSTREAM_REPO" --clone=false || true
+          for attempt in 1 2 3 4 5; do
+            if gh repo view "${owner}/mise" >/dev/null 2>&1; then
+              break
+            fi
+            sleep "$((attempt * 3))"
+          done
+          git clone "https://x-access-token:${GH_TOKEN}@github.com/${owner}/mise.git" "$work/mise"
+          git -C "$work/mise" remote add upstream "https://github.com/${MISE_UPSTREAM_REPO}.git"
+          git -C "$work/mise" fetch upstream main
+          git -C "$work/mise" checkout -B "$branch" upstream/main
+          git -C "$work/mise" config user.name "github-actions[bot]"
+          git -C "$work/mise" config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          "$GITHUB_WORKSPACE/_scripts/upsert_mise_registry_entry.sh" "$work/mise/registry.toml"
+          git -C "$work/mise" add registry.toml
+          if ! git -C "$work/mise" diff --cached --quiet; then
+            git -C "$work/mise" commit -m "Add whitman"
+            git -C "$work/mise" push --force-with-lease origin "$branch"
+          else
+            git -C "$work/mise" push --force-with-lease origin "$branch"
+          fi
+
+          gh pr create \
+            --repo "$MISE_UPSTREAM_REPO" \
+            --head "${owner}:${branch}" \
+            --base main \
+            --title "Add whitman" \
+            --body "Adds whitman, an interactive profile picker for project AGENTS.md files." \
+            || true

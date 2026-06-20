@@ -1,0 +1,12 @@
+[tasks.check]
+description = "Run local CI checks"
+run = [
+  "cargo fmt --check",
+  "cargo clippy --all-targets --all-features -- -D warnings",
+  "cargo test --all-targets --all-features",
+]
+
+[tasks.deploy]
+description = "Push main and let GitHub Actions publish the Cargo.toml version"
+confirm = "This pushes main. If Cargo.toml has a new version, GitHub Actions will publish it. Continue?"
+run = "git push origin main"

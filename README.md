@@ -122,12 +122,54 @@ CI runs format, clippy, and tests on Linux, macOS, and Windows.
 
 ## Publishing
 
-The crates.io package name is `whitman`. Before publishing:
+The release targets are:
+
+- crates.io package: `whitman`
+- Homebrew formula: `Formula/whitman.rb` in your tap repository
+- mise registry shorthand: `[tools.whitman]` in the mise registry
+
+Before the first crates.io publish, create a crates.io token and run:
 
 ```sh
-cargo package
-cargo publish
+cargo login
 ```
+
+Before the first CI publish, add these repository secrets to
+`ProximalEnergy/whitman`:
+
+- `CARGO_REGISTRY_TOKEN`: crates.io API token
+- `RELEASE_GITHUB_TOKEN`: GitHub token with access to this repository, the
+  `ProximalEnergy/homebrew-tap` repository, and a fork of `jdx/mise`
+
+The Homebrew tap repository is `ProximalEnergy/homebrew-tap`. Users can install
+with:
+
+
+```sh
+brew install ProximalEnergy/tap/whitman
+```
+
+Until the registry shorthand is merged upstream, users can still install from
+crates.io directly:
+
+```sh
+mise use cargo:whitman
+```
+
+To publish a new release, bump `Cargo.toml`, commit the change, and push `main`.
+The release workflow runs on each push to `main`; if `v<Cargo.toml version>`
+does not already exist, it publishes that version.
+
+For convenience, this repository also has:
+
+```sh
+mise run deploy
+```
+
+The task pushes `main`, which triggers GitHub Actions. The workflow runs format,
+clippy, and tests; publishes to crates.io; creates the `v<version>` tag and
+GitHub release; updates `Formula/whitman.rb` in the Homebrew tap; then opens or
+updates a pull request to `jdx/mise` for the official registry shorthand.
 
 ## License
 
