@@ -140,10 +140,14 @@ jobs:
           fi
 
       - name: Open mise registry PR
-        if: steps.version.outputs.release_exists != 'true'
         env:
           GH_TOKEN: ${{ secrets.RELEASE_GITHUB_TOKEN }}
         run: |
+          test -n "$GH_TOKEN" || {
+            echo "RELEASE_GITHUB_TOKEN is required for mise PR writes" >&2
+            exit 1
+          }
+
           owner="$(gh api user --jq .login)"
           branch="add-whitman-registry"
           work="$(mktemp -d)"
@@ -162,19 +166,18 @@ jobs:
           git -C "$work/mise" config user.name "github-actions[bot]"
           git -C "$work/mise" config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          "$GITHUB_WORKSPACE/_scripts/upsert_mise_registry_entry.sh" "$work/mise/registry.toml"
-          git -C "$work/mise" add registry.toml
+          "$GITHUB_WORKSPACE/_scripts/upsert_mise_registry_entry.sh" "$work/mise"
+          git -C "$work/mise" add registry/whitman.toml
           if ! git -C "$work/mise" diff --cached --quiet; then
             git -C "$work/mise" commit -m "Add whitman"
             git -C "$work/mise" push --force-with-lease origin "$branch"
+            gh pr create \
+              --repo "$MISE_UPSTREAM_REPO" \
+              --head "${owner}:${branch}" \
+              --base main \
+              --title "Add whitman" \
+              --body "Adds whitman, an interactive profile picker for project AGENTS.md files." \
+              || true
           else
-            git -C "$work/mise" push --force-with-lease origin "$branch"
+            echo "mise registry already has whitman; no PR update needed."
           fi
-
-          gh pr create \
-            --repo "$MISE_UPSTREAM_REPO" \
-            --head "${owner}:${branch}" \
-            --base main \
-            --title "Add whitman" \
-            --body "Adds whitman, an interactive profile picker for project AGENTS.md files." \
-            || true
